@@ -1,5 +1,5 @@
 const express = require('express');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -13,11 +13,10 @@ function buildApp() {
     // Middleware
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
-    app.use(session({
-        secret: process.env.SESSION_SECRET || 'hackathon-secret-key-2026',
-        resave: false,
-        saveUninitialized: true,
-        cookie: { maxAge: 24 * 60 * 60 * 1000 }
+    app.use(cookieSession({
+        name: 'hackSession',
+        keys: [process.env.SESSION_SECRET || 'hackathon-secret-key-2026'],
+        maxAge: 24 * 60 * 60 * 1000
     }));
     app.use(express.static(path.join(__dirname, 'public')));
 
@@ -62,7 +61,7 @@ function buildApp() {
     });
 
     app.post('/api/auth/logout', (req, res) => {
-        req.session.destroy();
+        req.session = null;
         res.json({ success: true, message: 'Logout berhasil.' });
     });
 
