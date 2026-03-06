@@ -49,9 +49,9 @@ function buildApp() {
 
     // ============== AUTH ROUTES ==============
 
-    app.post('/api/auth/login', (req, res) => {
+    app.post('/api/auth/login', async (req, res) => {
         const { username, password } = req.body;
-        const admin = queryOne('SELECT * FROM admin_credentials WHERE id = 1');
+        const admin = await queryOne('SELECT * FROM admin_credentials WHERE id = 1');
 
         if (admin && admin.username === username && admin.password === password) {
             req.session.isAdmin = true;
@@ -155,21 +155,21 @@ function buildApp() {
 
     // ============== HACKATHON SETTINGS ==============
 
-    app.get('/api/hackathon', (req, res) => {
-        const settings = queryOne('SELECT * FROM hackathon_settings WHERE id = 1');
+    app.get('/api/hackathon', async (req, res) => {
+        const settings = await queryOne('SELECT * FROM hackathon_settings WHERE id = 1');
         res.json(settings);
     });
 
-    app.put('/api/hackathon', requireAdmin, (req, res) => {
+    app.put('/api/hackathon', requireAdmin, async (req, res) => {
         const { name, end_time } = req.body;
-        execute('UPDATE hackathon_settings SET name = ?, end_time = ? WHERE id = 1', [name, end_time]);
-        const updated = queryOne('SELECT * FROM hackathon_settings WHERE id = 1');
+        await execute('UPDATE hackathon_settings SET name = ?, end_time = ? WHERE id = 1', [name, end_time]);
+        const updated = await queryOne('SELECT * FROM hackathon_settings WHERE id = 1');
         res.json(updated);
     });
 
     // ============== SUBMISSIONS ==============
 
-    app.get('/api/submissions', (req, res) => {
+    app.get('/api/submissions', async (req, res) => {
         const { sort = 'submitted_at', order = 'desc', search = '' } = req.query;
 
         const allowedSorts = ['submitted_at', 'team_name', 'project_title', 'status'];
@@ -186,11 +186,11 @@ function buildApp() {
 
         query += ` ORDER BY ${sortCol} ${sortOrder}`;
 
-        const submissions = queryAll(query, params);
+        const submissions = await queryAll(query, params);
         res.json(submissions);
     });
 
-    app.post('/api/submissions', upload.single('file'), (req, res) => {
+    app.post('/api/submissions', upload.single('file'), async (req, res) => {
         const { team_name, members, project_title, description, demo_link, captcha_answer } = req.body;
 
         if (!team_name || !members || !project_title) {
@@ -206,7 +206,6 @@ function buildApp() {
         let file_path = null;
         if (req.file) {
             if (IS_VERCEL) {
-                // On Vercel, save to /tmp
                 const tmpPath = '/tmp/' + Date.now() + '-' + req.file.originalname;
                 fs.writeFileSync(tmpPath, req.file.buffer);
                 file_path = tmpPath;
@@ -215,29 +214,29 @@ function buildApp() {
             }
         }
 
-        const result = execute(
+        const result = await execute(
             'INSERT INTO submissions (team_name, members, project_title, description, demo_link, file_path) VALUES (?, ?, ?, ?, ?, ?)',
             [team_name, members, project_title, description || '', demo_link || '', file_path]
         );
 
-        const submission = queryOne('SELECT * FROM submissions WHERE id = ?', [result.lastInsertRowid]);
+        const submission = await queryOne('SELECT * FROM submissions WHERE id = ?', [result.lastInsertRowid]);
         res.status(201).json(submission);
     });
 
-    app.patch('/api/submissions/:id/status', requireAdmin, (req, res) => {
+    app.patch('/api/submissions/:id/status', requireAdmin, async (req, res) => {
         const { status } = req.body;
         const validStatuses = ['pending', 'reviewed', 'presented'];
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: 'Status tidak valid.' });
         }
-        execute('UPDATE submissions SET status = ? WHERE id = ?', [status, parseInt(req.params.id)]);
-        const updated = queryOne('SELECT * FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
+        await execute('UPDATE submissions SET status = ? WHERE id = ?', [status, parseInt(req.params.id)]);
+        const updated = await queryOne('SELECT * FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
         if (!updated) return res.status(404).json({ error: 'Submission tidak ditemukan.' });
         res.json(updated);
     });
 
-    app.delete('/api/submissions/:id', requireAdmin, (req, res) => {
-        const submission = queryOne('SELECT * FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
+    app.delete('/api/submissions/:id', requireAdmin, async (req, res) => {
+        const submission = await queryOne('SELECT * FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
         if (!submission) return res.status(404).json({ error: 'Submission tidak ditemukan.' });
 
         if (submission.file_path && !IS_VERCEL) {
@@ -245,14 +244,14 @@ function buildApp() {
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         }
 
-        execute('DELETE FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
+        await execute('DELETE FROM submissions WHERE id = ?', [parseInt(req.params.id)]);
         res.json({ message: 'Submission berhasil dihapus.' });
     });
 
     // ============== RANDOMIZER ==============
 
-    app.get('/api/randomizer/history', (req, res) => {
-        const history = queryAll(
+    app.get('/api/randomizer/history', async (req, res) => {
+        const history = await queryAll(
             `SELECT rh.id, rh.picked_at, s.team_name, s.project_title
        FROM randomizer_history rh
        JOIN submissions s ON rh.submission_id = s.id
@@ -262,21 +261,21 @@ function buildApp() {
         res.json(history);
     });
 
-    app.delete('/api/randomizer/history', requireAdmin, (req, res) => {
-        execute('DELETE FROM randomizer_history');
+    app.delete('/api/randomizer/history', requireAdmin, async (req, res) => {
+        await execute('DELETE FROM randomizer_history');
         res.json({ message: 'Riwayat pemilihan berhasil dihapus.' });
     });
 
-    app.post('/api/randomizer/pick', requireAdmin, (req, res) => {
-        const submissions = queryAll("SELECT * FROM submissions WHERE status != 'presented'");
+    app.post('/api/randomizer/pick', requireAdmin, async (req, res) => {
+        const submissions = await queryAll("SELECT * FROM submissions WHERE status != 'presented'");
 
         if (submissions.length === 0) {
             return res.status(400).json({ error: 'Tidak ada submission yang tersedia untuk dipilih.' });
         }
 
         const picked = submissions[Math.floor(Math.random() * submissions.length)];
-        execute("UPDATE submissions SET status = 'presented' WHERE id = ?", [picked.id]);
-        execute('INSERT INTO randomizer_history (submission_id) VALUES (?)', [picked.id]);
+        await execute("UPDATE submissions SET status = 'presented' WHERE id = ?", [picked.id]);
+        await execute('INSERT INTO randomizer_history (submission_id) VALUES (?)', [picked.id]);
 
         res.json({
             allSubmissions: submissions.map(s => ({ id: s.id, team_name: s.team_name, project_title: s.project_title })),

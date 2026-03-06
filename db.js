@@ -1,43 +1,29 @@
-const initSqlJs = require('sql.js');
+const { createClient } = require('@libsql/client');
 const path = require('path');
-const fs = require('fs');
 
 const IS_VERCEL = process.env.VERCEL === '1';
-const DB_PATH = IS_VERCEL
-  ? path.join('/tmp', 'hackathon.db')
-  : path.join(__dirname, 'hackathon.db');
 
-let db = null;
+let client = null;
 
 async function getDb() {
-  if (db) return db;
+  if (client) return client;
 
-  let SQL;
-  if (IS_VERCEL) {
-    // On Vercel, explicitly load the WASM binary to avoid path resolution issues
-    const wasmPath = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-    let wasmBinary;
-    try {
-      wasmBinary = fs.readFileSync(wasmPath);
-    } catch (e) {
-      // Fallback path for Vercel's bundled structure
-      wasmBinary = fs.readFileSync(path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
-    }
-    SQL = await initSqlJs({ wasmBinary });
+  if (process.env.TURSO_DATABASE_URL) {
+    // Production: use Turso cloud database
+    client = createClient({
+      url: process.env.TURSO_DATABASE_URL,
+      authToken: process.env.TURSO_AUTH_TOKEN
+    });
   } else {
-    SQL = await initSqlJs();
-  }
-
-  // Load existing database file or create new
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
+    // Local dev: use SQLite file
+    const dbPath = path.join(__dirname, 'hackathon.db');
+    client = createClient({
+      url: `file:${dbPath}`
+    });
   }
 
   // Create tables
-  db.run(`
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS hackathon_settings (
       id INTEGER PRIMARY KEY DEFAULT 1,
       name TEXT DEFAULT 'Hackathon 2026',
@@ -46,7 +32,7 @@ async function getDb() {
     )
   `);
 
-  db.run(`
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS submissions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       team_name TEXT NOT NULL,
@@ -60,7 +46,7 @@ async function getDb() {
     )
   `);
 
-  db.run(`
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS randomizer_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       submission_id INTEGER NOT NULL,
@@ -69,7 +55,7 @@ async function getDb() {
     )
   `);
 
-  db.run(`
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS admin_credentials (
       id INTEGER PRIMARY KEY DEFAULT 1,
       username TEXT NOT NULL DEFAULT 'admin',
@@ -79,56 +65,43 @@ async function getDb() {
   `);
 
   // Seed default hackathon settings if not exists
-  const result = db.exec('SELECT COUNT(*) as count FROM hackathon_settings');
-  const count = result.length > 0 ? result[0].values[0][0] : 0;
-  if (count === 0) {
+  const settingsResult = await client.execute('SELECT COUNT(*) as count FROM hackathon_settings');
+  if (settingsResult.rows[0].count === 0) {
     const endTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
-    db.run('INSERT INTO hackathon_settings (id, name, end_time) VALUES (1, ?, ?)', ['Hackathon 2026', endTime]);
-    saveDb();
+    await client.execute({
+      sql: 'INSERT INTO hackathon_settings (id, name, end_time) VALUES (1, ?, ?)',
+      args: ['Hackathon 2026', endTime]
+    });
   }
 
   // Seed default admin credentials if not exists
-  const adminResult = db.exec('SELECT COUNT(*) as count FROM admin_credentials');
-  const adminCount = adminResult.length > 0 ? adminResult[0].values[0][0] : 0;
-  if (adminCount === 0) {
-    db.run('INSERT INTO admin_credentials (id, username, password) VALUES (1, ?, ?)', ['admin', 'admin123']);
-    saveDb();
+  const adminResult = await client.execute('SELECT COUNT(*) as count FROM admin_credentials');
+  if (adminResult.rows[0].count === 0) {
+    await client.execute({
+      sql: 'INSERT INTO admin_credentials (id, username, password) VALUES (1, ?, ?)',
+      args: ['admin', 'admin123']
+    });
   }
 
-  return db;
-}
-
-function saveDb() {
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
-  }
+  return client;
 }
 
 // Helper: run SELECT and return array of objects
-function queryAll(sql, params = []) {
-  const stmt = db.prepare(sql);
-  if (params.length) stmt.bind(params);
-  const results = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return results;
+async function queryAll(sql, params = []) {
+  const result = await client.execute({ sql, args: params });
+  return result.rows;
 }
 
 // Helper: run SELECT and return single object
-function queryOne(sql, params = []) {
-  const rows = queryAll(sql, params);
+async function queryOne(sql, params = []) {
+  const rows = await queryAll(sql, params);
   return rows.length > 0 ? rows[0] : null;
 }
 
 // Helper: run INSERT/UPDATE/DELETE
-function execute(sql, params = []) {
-  db.run(sql, params);
-  saveDb();
-  return { lastInsertRowid: db.exec('SELECT last_insert_rowid()')[0].values[0][0], changes: db.getRowsModified() };
+async function execute(sql, params = []) {
+  const result = await client.execute({ sql, args: params });
+  return { lastInsertRowid: Number(result.lastInsertRowid), changes: result.rowsAffected };
 }
 
-module.exports = { getDb, saveDb, queryAll, queryOne, execute };
+module.exports = { getDb, queryAll, queryOne, execute };
