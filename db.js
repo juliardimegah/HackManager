@@ -12,7 +12,10 @@ let db = null;
 async function getDb() {
   if (db) return db;
 
-  const SQL = await initSqlJs();
+  const sqlOptions = IS_VERCEL
+    ? { locateFile: () => 'https://sql.js.org/dist/sql-wasm.wasm' }
+    : {};
+  const SQL = await initSqlJs(sqlOptions);
 
   // Load existing database file or create new
   if (fs.existsSync(DB_PATH)) {
