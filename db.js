@@ -12,10 +12,21 @@ let db = null;
 async function getDb() {
   if (db) return db;
 
-  const sqlOptions = IS_VERCEL
-    ? { locateFile: () => 'https://sql.js.org/dist/sql-wasm.wasm' }
-    : {};
-  const SQL = await initSqlJs(sqlOptions);
+  let SQL;
+  if (IS_VERCEL) {
+    // On Vercel, explicitly load the WASM binary to avoid path resolution issues
+    const wasmPath = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+    let wasmBinary;
+    try {
+      wasmBinary = fs.readFileSync(wasmPath);
+    } catch (e) {
+      // Fallback path for Vercel's bundled structure
+      wasmBinary = fs.readFileSync(path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'));
+    }
+    SQL = await initSqlJs({ wasmBinary });
+  } else {
+    SQL = await initSqlJs();
+  }
 
   // Load existing database file or create new
   if (fs.existsSync(DB_PATH)) {
