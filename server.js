@@ -198,13 +198,11 @@ function buildApp() {
             return res.status(400).json({ error: 'Nama tim, anggota, dan judul proyek wajib diisi.' });
         }
 
-        // Validate captcha (skip for admin)
-        if (!(req.session && req.session.isAdmin)) {
-            if (!captcha_answer || parseInt(captcha_answer) !== req.session.captchaAnswer) {
-                return res.status(400).json({ error: 'Jawaban captcha salah. Silakan coba lagi.' });
-            }
-            delete req.session.captchaAnswer;
+        // Always validate captcha on submissions
+        if (!captcha_answer || parseInt(captcha_answer) !== req.session.captchaAnswer) {
+            return res.status(400).json({ error: 'Jawaban captcha salah. Silakan coba lagi.' });
         }
+        delete req.session.captchaAnswer;
 
         let file_path = null;
         if (req.file) {
