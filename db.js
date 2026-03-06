@@ -2,7 +2,10 @@ const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'hackathon.db');
+const IS_VERCEL = process.env.VERCEL === '1';
+const DB_PATH = IS_VERCEL
+  ? path.join('/tmp', 'hackathon.db')
+  : path.join(__dirname, 'hackathon.db');
 
 let db = null;
 
